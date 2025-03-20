@@ -5,7 +5,7 @@ from fastapi.security import OAuth2PasswordBearer, APIKeyHeader
 from jose import jwt, JWTError
 from pydantic import ValidationError
 from sqlalchemy.orm import Session
-import datetime 
+from datetime import datetime
 from app.core.settings import settings
 from app.crud.user import crud_user
 from app.crud.api_key import crud_api_key
