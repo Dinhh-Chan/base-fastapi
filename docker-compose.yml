@@ -7,28 +7,28 @@ services:
       dockerfile: Dockerfile
     ports:
       - "8000:8000"
-    env_file:
-      - .env
+    environment:
+      - POSTGRES_SERVER=db
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=app
+      - SQL_DATABASE_URL=postgresql+psycopg2://postgres:postgres@db:5432/app
     volumes:
-      - ./:/app/  # Mount thư mục hiện tại vào container
+      - ./:/app/
     depends_on:
       - db
-    command: ["sh", "/app/start.sh"]  # Sử dụng script khởi động
-    restart: unless-stopped
+    command: ["sh", "/app/start.sh"]
 
   db:
     image: postgres:14
     volumes:
       - postgres_data:/var/lib/postgresql/data/
-    env_file:
-      - .env
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=app
     ports:
       - "5432:5432"
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
 
 volumes:
   postgres_data:

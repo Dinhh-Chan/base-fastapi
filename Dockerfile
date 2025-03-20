@@ -28,4 +28,5 @@ COPY . /app/
 RUN chmod +x /app/start.sh
 
 # Use start.sh as entrypoint
-CMD ["sh", "/app/start.sh"]
+COPY start.sh /app/
+RUN chmod +x /app/start.sh
