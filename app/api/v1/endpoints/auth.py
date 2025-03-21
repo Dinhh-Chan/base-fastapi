@@ -11,8 +11,8 @@ from app.crud.user import crud_user
 from app.db.session import get_db
 from app.schemas.token import Token
 from app.schemas.user import User, UserCreate
-
-
+from app.crud.api_key import crud_api_key
+from app.schemas.api_key import APIKeyCreate
 router = APIRouter()
 
 
@@ -23,10 +23,9 @@ def login_access_token(
     """
     OAuth2 compatible token login, get an access token for future requests.
     """
-    # Try to authenticate with username (which could be email)
+    # xác thực user như bình thường
     user = crud_user.get_by_email(db, email=form_data.username)
     if not user:
-        # If not found by email, try by username
         user = crud_user.get_by_username(db, username=form_data.username)
     
     if not user or not verify_password(form_data.password, user.hashed_password):
@@ -42,6 +41,25 @@ def login_access_token(
             detail="Inactive user",
         )
     
+    # Tạo API key tự động nếu người dùng chưa có
+    api_keys = crud_api_key.get_multi_by_user(db, user_id=user.id)
+    
+    if not api_keys:
+        try:
+            # Tạo API key mới
+            api_key_in = APIKeyCreate(
+                name="Auto-generated on login",
+                is_active=True
+            )
+            api_key = crud_api_key.create_with_user(
+                db=db, obj_in=api_key_in, user_id=user.id
+            )
+            print(f"Created new API key: {api_key.key}")
+        except Exception as e:
+            print(f"Error creating API key: {str(e)}")
+            # Không làm gián đoạn quy trình login nếu tạo API key thất bại
+    
+    # Tạo access token và trả về
     access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     return {
         "access_token": create_access_token(

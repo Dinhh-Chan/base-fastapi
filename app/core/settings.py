@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     
     # SECURITY
     SECRET_KEY: str = secrets.token_urlsafe(32)
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 8
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 0
     ALGORITHM: str = "HS256"
     
     # BACKEND_CORS_ORIGINS
