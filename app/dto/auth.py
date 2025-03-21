@@ -21,3 +21,16 @@ class TokenResponse(BaseModel):
     """Schema cho phản hồi token."""
     access_token: str
     token_type: str
+class Token(BaseModel):
+    """Token schema."""
+    access_token: str
+    token_type: str
+    expires_in: int
+    user_id: int
+    is_superuser: bool
+
+
+class TokenPayload(BaseModel):
+    """Token payload schema."""
+    sub: Optional[int] = None
+    exp: Optional[int] = None

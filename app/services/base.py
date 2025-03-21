@@ -484,3 +484,175 @@ class CRUDBase(Generic[ModelType, CreateSchemaType, UpdateSchemaType]):
         else:
             # Create new record
             return await self.create(db, obj_in=obj_in)
+    async def filter_by_arrays(
+    self, 
+    db: Session, 
+    *, 
+    array_filters: Dict[str, List[Any]] = None,
+    exact_filters: Dict[str, Any] = None,
+    match_any: bool = False,
+    skip: int = 0,
+    limit: int = 100,
+    order_by: Optional[str] = None,
+    order_direction: str = "asc"
+) -> List[ModelType]:
+
+        """
+        Filter records by array fields. "
+        Args:
+        db: Database session
+        array_filters: Dictionary of field:list_of_values to filter by (IN operator)
+        exact_filters: Dictionary of field:value for exact matching
+        match_any: If True, uses OR logic (match any condition), else AND logic (match all)
+        skip: Number of records to skip
+        limit: Maximum number of records to return
+        order_by: Field to order by
+        order_direction: Direction to order (asc/desc)
+        
+    Returns:
+        List of records that match the conditions
+    """
+        if array_filters:
+            array_conditions = []
+            for field, values in array_filters.items():
+                if hasattr(self.model, field) and values and len(values) > 0:
+                    array_conditions.append(getattr(self.model, field).in_(values))
+            
+            if array_conditions:
+                if match_any:
+                    query = query.where(or_(*array_conditions))
+                else:
+                    query = query.where(and_(*array_conditions))
+        if exact_filters:
+            exact_conditions = []
+            for field, value in exact_filters.items():
+                if hasattr(self.model, field) and value is not None:
+                    exact_conditions.append(getattr(self.model, field) == value)
+            
+            if exact_conditions:
+                if match_any and not array_filters:
+                    query = query.where(or_(*exact_conditions))
+                else:
+                    query = query.where(and_(*exact_conditions))
+        
+        # Apply sorting
+        if order_by and hasattr(self.model, order_by):
+            if order_direction.lower() == "desc":
+                query = query.order_by(desc(getattr(self.model, order_by)))
+            else:
+                query = query.order_by(asc(getattr(self.model, order_by)))
+        else:
+            if hasattr(self.model, "id"):
+                query = query.order_by(asc(self.model.id))
+        
+        query = query.offset(skip).limit(limit)
+        
+        result = await db.execute(query)
+        return result.scalars().all()
+    async def filter_by_arrays_paginated(
+    self, 
+    db: Session, 
+    *, 
+    array_filters: Dict[str, List[Any]] = None,
+    exact_filters: Dict[str, Any] = None,
+    match_any: bool = False,
+    page: int = 1,
+    page_size: int = 10,
+    order_by: Optional[str] = None,
+    order_direction: str = "asc",
+    include_total: bool = True
+) -> Dict[str, Any]:
+        """
+        Filter records by array conditions with pagination.
+        
+        Args:
+            db: Database session
+            array_filters: Dictionary of field:list_of_values to filter by (IN operator)
+            exact_filters: Dictionary of field:value for exact matching
+            match_any: If True, uses OR logic (match any condition), else AND logic (match all)
+            page: Page number (1-based)
+            page_size: Items per page
+            order_by: Field to order by
+            order_direction: Direction to order (asc/desc)
+            include_total: Whether to include total count
+            
+        Returns:
+            Dict with items, total count (if requested), and page info
+        """
+        # Calculate offset
+        offset = (page - 1) * page_size
+        
+        # Start building query
+        query = select(self.model)
+        
+        # Build conditions list
+        all_conditions = []
+        
+        # Process array filters (IN conditions)
+        if array_filters:
+            for field, values in array_filters.items():
+                if hasattr(self.model, field) and values and len(values) > 0:
+                    all_conditions.append(getattr(self.model, field).in_(values))
+        
+        # Process exact match filters
+        if exact_filters:
+            for field, value in exact_filters.items():
+                if hasattr(self.model, field) and value is not None:
+                    all_conditions.append(getattr(self.model, field) == value)
+        
+        # Apply conditions to query
+        if all_conditions:
+            if match_any:
+                query = query.where(or_(*all_conditions))
+            else:
+                query = query.where(and_(*all_conditions))
+        
+        # Get total count if requested
+        total = None
+        if include_total:
+            count_query = select(func.count()).select_from(self.model)
+            
+            if all_conditions:
+                if match_any:
+                    count_query = count_query.where(or_(*all_conditions))
+                else:
+                    count_query = count_query.where(and_(*all_conditions))
+                    
+            result = await db.execute(count_query)
+            total = result.scalar()
+        # Apply sorting
+        if order_by and hasattr(self.model, order_by):
+            if order_direction.lower() == "desc":
+                query = query.order_by(desc(getattr(self.model, order_by)))
+            else:
+                query = query.order_by(asc(getattr(self.model, order_by)))
+        else:
+            # Default sort by id if exists
+            if hasattr(self.model, "id"):
+                query = query.order_by(asc(self.model.id))
+        # Apply pagination
+        query = query.offset(offset).limit(page_size)
+        # Execute query
+        result = await db.execute(query)
+        items = result.scalars().all()
+        # Calculate pagination info
+        total_pages = (total // page_size) + (1 if total % page_size > 0 else 0) if total is not None else None
+        has_next = page < total_pages if total_pages is not None else None
+        has_prev = page > 1
+        
+        # Return response
+        response = {
+            "items": items,
+            "pagination": {
+                "page": page,
+                "page_size": page_size,
+                "has_next": has_next,
+                "has_prev": has_prev,
+            }
+        }
+        
+        if include_total:
+            response["pagination"]["total"] = total
+            response["pagination"]["total_pages"] = total_pages
+            
+        return response

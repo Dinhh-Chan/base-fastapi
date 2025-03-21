@@ -1,51 +1,105 @@
 # app/dependencies/user.py
-from fastapi import Depends, HTTPException, status
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from jose import jwt, JWTError
-from sqlalchemy.ext.asyncio import AsyncSession
-from datetime import datetime
-from app.db.session import get_db
-from app.utils.security import JWT_SECRET_KEY, ALGORITHM
+from typing import Optional
 
-# Sử dụng HTTPBearer thay vì OAuth2PasswordBearer
-security = HTTPBearer()
+from fastapi import Depends, HTTPException, status
+from fastapi.security import OAuth2PasswordBearer
+from jose import jwt, JWTError
+from pydantic import ValidationError
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.models.user import User
+from app.services.user import user_service
+from app.dto.auth import TokenPayload
+from app.core.config import settings
+from app.db.session import get_db
+
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl=f"{settings.API_V1_STR}/auth/login")
 
 
 async def get_current_user(
     db: AsyncSession = Depends(get_db),
-    credentials: HTTPAuthorizationCredentials = Depends(security)
-) -> dict:
+    token: str = Depends(oauth2_scheme)
+) -> User:
     """
-    Validate access token.
+    Lấy người dùng hiện tại từ token.
+    
+    Args:
+        db: Database session
+        token: JWT token
+        
+    Returns:
+        User hiện tại
+        
+    Raises:
+        HTTPException: Nếu token không hợp lệ hoặc người dùng không tồn tại
     """
     try:
-        token = credentials.credentials
+        # Decode token
         payload = jwt.decode(
-            token, JWT_SECRET_KEY, algorithms=[ALGORITHM]
+            token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM]
         )
-        
-        # Kiểm tra xem token đã hết hạn chưa
-        if "exp" in payload and datetime.utcnow() > datetime.fromtimestamp(payload["exp"]):
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Token has expired",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
-        
-        # Trả về payload token
-        return payload
-    except JWTError:
+        token_data = TokenPayload(**payload)
+    except (JWTError, ValidationError):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid authentication credentials",
+            detail="Không thể xác thực thông tin đăng nhập",
             headers={"WWW-Authenticate": "Bearer"},
         )
+        
+    # Get user
+    user = await user_service.get(db, id=token_data.sub)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Không tìm thấy người dùng"
+        )
+        
+    return user
 
 
 async def get_current_active_user(
-    current_user: dict = Depends(get_current_user),
-) -> dict:
+    current_user: User = Depends(get_current_user),
+) -> User:
     """
-    Return current user data from token.
+    Lấy người dùng hiện tại đang hoạt động.
+    
+    Args:
+        current_user: User hiện tại
+        
+    Returns:
+        User hiện tại đang hoạt động
+        
+    Raises:
+        HTTPException: Nếu người dùng không hoạt động
     """
+    if not current_user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Tài khoản không hoạt động"
+        )
+        
+    return current_user
+
+
+async def get_current_superuser(
+    current_user: User = Depends(get_current_active_user),
+) -> User:
+    """
+    Lấy người dùng hiện tại với quyền superuser.
+    
+    Args:
+        current_user: User hiện tại đang hoạt động
+        
+    Returns:
+        User hiện tại với quyền superuser
+        
+    Raises:
+        HTTPException: Nếu người dùng không có quyền superuser
+    """
+    if not current_user.is_superuser:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Không đủ quyền truy cập"
+        )
+        
     return current_user
