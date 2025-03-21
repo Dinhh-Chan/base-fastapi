@@ -29,11 +29,13 @@ connection_params = {
 }
 
 # Thử kết nối với số lần thử lại
+connected = False
 for i in range(max_retries):
     try:
         conn = psycopg2.connect(**connection_params)
         conn.close()
         print('PostgreSQL connection successful!')
+        connected = True
         break
     except Exception as e:
         print(f'Attempt {i+1}/{max_retries}: PostgreSQL connection failed: {e}')
@@ -43,6 +45,40 @@ for i in range(max_retries):
         else:
             print('Could not connect to PostgreSQL after multiple attempts')
             exit(1)
+
+# Kiểm tra biến môi trường để xác định có reset database hay không
+if connected and os.environ.get('RESET_DB', '').lower() == 'true':
+    print('RESET_DB is set to true, dropping all tables...')
+    try:
+        conn = psycopg2.connect(**connection_params)
+        conn.autocommit = True
+        cursor = conn.cursor()
+        
+        # Xóa tất cả các bảng trong database
+        cursor.execute(\"\"\"
+        DO $$ DECLARE
+            r RECORD;
+        BEGIN
+            FOR r IN (SELECT tablename FROM pg_tables WHERE schemaname = 'public') LOOP
+                EXECUTE 'DROP TABLE IF EXISTS ' || quote_ident(r.tablename) || ' CASCADE';
+            END LOOP;
+        END $$;
+        \"\"\")
+        
+        # Xóa alembic_version table nếu tồn tại
+        cursor.execute('DROP TABLE IF EXISTS alembic_version;')
+        
+        conn.close()
+        print('All tables dropped successfully!')
+        
+        # Xóa các file migration cũ
+        if os.path.exists('/app/alembic/versions'):
+            import shutil
+            shutil.rmtree('/app/alembic/versions')
+            os.makedirs('/app/alembic/versions')
+            print('Removed old migration files')
+    except Exception as e:
+        print(f'Error resetting database: {e}')
 "
 
 # Tạo migrations ban đầu nếu cần
@@ -58,14 +94,24 @@ alembic upgrade head
 # Khởi tạo dữ liệu ban đầu
 echo "Initializing data..."
 python -c "
+import asyncio
 from app.db.init_db import init_db
-from app.db.session import SessionLocal
-try:
-    init_db(SessionLocal())
+from app.db.session import AsyncSessionLocal
+
+async def run_init_db():
+    async with AsyncSessionLocal() as session:
+        await init_db(session)
     print('Database initialized successfully!')
+
+try:
+    asyncio.run(run_init_db())
 except Exception as e:
     print(f'Error initializing database: {e}')
 "
+
+# Chạy auto_migrate để thiết lập theo dõi thay đổi models
+echo "Setting up automatic database migration..."
+python -m app.db.auto_migrate &
 
 # Khởi động ứng dụng
 echo "Starting application..."

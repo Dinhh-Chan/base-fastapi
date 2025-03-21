@@ -12,7 +12,9 @@ services:
       - POSTGRES_USER=postgres
       - POSTGRES_PASSWORD=postgres
       - POSTGRES_DB=app
-      - SQL_DATABASE_URL=postgresql+psycopg2://postgres:postgres@db:5432/app
+      - SQL_DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/app
+      - RESET_DB=true 
+      - AUTO_MIGRATE=true 
     volumes:
       - ./:/app/
     depends_on:
