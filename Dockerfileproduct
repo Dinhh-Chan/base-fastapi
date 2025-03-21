@@ -1,0 +1,45 @@
+FROM python:3.10-slim as builder
+
+WORKDIR /app
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends gcc libpq-dev \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+FROM python:3.10-slim
+
+WORKDIR /app
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libpq5 curl \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=builder /opt/venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/app
+
+# Tạo người dùng không có đặc quyền
+RUN useradd -m appuser
+
+# Sao chép mã nguồn ứng dụng
+COPY --chown=appuser:appuser . .
+
+# Cấp quyền thực thi cho script khởi động
+RUN chmod +x /app/start-prod.sh
+
+# Chuyển sang người dùng không có đặc quyền
+USER appuser
+
+# Sử dụng script khởi động production
+CMD ["./start-prod.sh"]
+
+# Expose cổng
+EXPOSE 8000
+
+# Thiết lập healthcheck
+HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
+  CMD curl -f http://localhost:8000/health || exit 1
